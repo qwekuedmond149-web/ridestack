@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ride app back stack</title>
+<style>
+:root{--bg:#eef2f5;--ink:#14213d;--muted:#5b6678;--card:#fff;--line:#d5dce4;--accent:#1f7a8c;--accent-ink:#fff;--top:#ffb703}
+@media (prefers-color-scheme:dark){:root{--bg:#10171f;--ink:#e8edf2;--muted:#9aa7b6;--card:#1a2430;--line:#2c3a4a;--accent:#4fb3c6;--accent-ink:#10171f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px 40px}
+h1{font-size:1.5rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 24px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
+@media (max-width:640px){.grid{grid-template-columns:1fr}}
+.phone{background:var(--card);border:1px solid var(--line);border-radius:28px;padding:20px;min-height:420px;display:flex;flex-direction:column}
+.phone h2{font-size:1.25rem;margin:0 0 12px}
+.body{flex:1}
+.body p{margin:0 0 12px;color:var(--muted)}
+input[type=text]{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);font:inherit}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip,.opt{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;cursor:pointer}
+.opt{display:flex;justify-content:space-between;width:100%;border-radius:12px;padding:12px;margin-bottom:8px;text-align:left}
+.opt[aria-pressed=true]{border-color:var(--accent);outline:2px solid var(--accent)}
+.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)}
+.actions{display:flex;gap:8px;margin-top:16px}
+button.main{flex:1;padding:12px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;cursor:pointer}
+button.main:disabled{opacity:.4;cursor:not-allowed}
+button.back{padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+button:focus-visible,.chip:focus-visible,.opt:focus-visible,input:focus-visible{outline:3px solid var(--top);outline-offset:2px}
+.side h3{font-size:1rem;margin:0 0 8px}
+.stack{display:flex;flex-direction:column-reverse;gap:6px;min-height:60px;margin-bottom:20px}
+.item{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between}
+.item.top{background:var(--top);border-color:var(--top);color:#14213d;font-weight:600}
+.log{margin:0;padding-left:18px;color:var(--muted);font-size:.9rem}
+.note{min-height:1.5em;color:var(--accent);font-weight:600;margin:0 0 12px}
+@media (prefers-reduced-motion:no-preference){.item{animation:drop .18s ease-out}@keyframes drop{from{transform:translateY(-8px);opacity:0}}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Ride app back stack</h1>
+  <p class="sub">Each screen is pushed as you go forward. Back pops the top screen, and earlier choices stay in place.</p>
+  <div class="grid">
+    <section class="phone" aria-live="polite">
+      <h2 id="title"></h2>
+      <div class="body" id="body"></div>
+      <p class="note" id="note"></p>
+      <div class="actions">
+        <button class="back" id="back">Back</button>
+        <button class="main" id="next"></button>
+      </div>
+    </section>
+    <aside class="side">
+      <h3>Stack (top is highlighted)</h3>
+      <div class="stack" id="stack"></div>
+      <h3>Operations</h3>
+      <ol class="log" id="log"></ol>
+    </aside>
+  </div>
+</main>
+<script>
+class ScreenStack {
+  constructor(){ this.items = []; }
+  push(s){ this.items.push(s); }
+  pop(){ return this.items.pop(); }
+  peek(){ return this.items[this.items.length - 1]; }
+  size(){ return this.items.length; }
+  clear(){ this.items = []; }
+}
+
+const types = [
+  { name: "Economy", rate: 1 },
+  { name: "Comfort", rate: 1.5 },
+  { name: "XL", rate: 2 }
+];
+const state = { dest: "", type: null };
+const stack = new ScreenStack();
+const logLines = [];
+const $ = id => document.getElementById(id);
+
+function log(text){
+  logLines.unshift(text);
+  if (logLines.length > 6) logLines.pop();
+}
+function fare(){ return state.type ? (12 * state.type.rate).toFixed(2) : "0.00"; }
+function go(screen){ stack.push(screen); log("push(" + screen + ")"); render(); }
+function note(t){ $("note").textContent = t || ""; }
+
+const screens = {
+  Home: {
+    title: "Where to?", cta: "Book a ride", ok: () => true, next: () => go("Destination"),
+    draw(b){ b.innerHTML = "<p>Book a ride in a few steps. Each step opens a new screen on top of the last.</p>"; }
+  },
+  Destination: {
+    title: "Enter destination", cta: "Continue", ok: () => state.dest.trim() !== "", next: () => go("RideType"),
+    draw(b){
+      const input = document.createElement("input");
+      input.type = "text"; input.placeholder = "Search for a place"; input.value = state.dest;
+      input.setAttribute("aria-label", "Destination");
+      input.oninput = () => { state.dest = input.value; $("next").disabled = !this.ok(); };
+      b.appendChild(input);
+      const chips = document.createElement("div"); chips.className = "chips";
+      ["Airport", "Central Market", "University gate"].forEach(t => {
+        const c = document.createElement("button"); c.className = "chip"; c.textContent = t;
+        c.onclick = () => { state.dest = t; input.value = t; $("next").disabled = false; };
+        chips.appendChild(c);
+      });
+      b.appendChild(chips);
+    }
+  },
+  RideType: {
+    title: "Choose ride type", cta: "Continue", ok: () => !!state.type, next: () => go("ConfirmFare"),
+    draw(b){
+      types.forEach(t => {
+        const o = document.createElement("button"); o.className = "opt";
+        o.setAttribute("aria-pressed", state.type === t);
+        o.innerHTML = "<span>" + t.name + "</span><span>" + (12 * t.rate).toFixed(2) + "</span>";
+        o.onclick = () => { state.type = t; render(); };
+        b.appendChild(o);
+      });
+    }
+  },
+  ConfirmFare: {
+    title: "Confirm fare", cta: "Confirm ride", ok: () => true,
+    next: () => { stack.clear(); log("clear() after confirm"); go("Tracking"); },
+    draw(b){
+      [["To", state.dest], ["Ride", state.type.name], ["Fare", fare()]].forEach(([k, v]) => {
+        const r = document.createElement("div"); r.className = "row";
+        const a = document.createElement("span"); a.textContent = k;
+        const c = document.createElement("strong"); c.textContent = v;
+        r.append(a, c); b.appendChild(r);
+      });
+    }
+  },
+  Tracking: {
+    title: "Driver on the way", cta: "Cancel ride", ok: () => true, next: () => cancelRide(),
+    draw(b){ b.innerHTML = "<p>Your driver is heading to you. Back is blocked here so you can’t return to fare confirmation.</p>"; }
+  }
+};
+
+function cancelRide(){
+  stack.clear(); state.dest = ""; state.type = null;
+  log("clear(), then push(Home)"); stack.push("Home"); render();
+  note("Ride cancelled.");
+}
+
+function render(){
+  const name = stack.peek(), s = screens[name];
+  $("title").textContent = s.title;
+  const body = $("body"); body.innerHTML = ""; s.draw(body);
+  const next = $("next"); next.textContent = s.cta; next.disabled = !s.ok();
+  const st = $("stack"); st.innerHTML = "";
+  stack.items.forEach((it, i) => {
+    const d = document.createElement("div");
+    d.className = "item" + (i === stack.size() - 1 ? " top" : "");
+    d.innerHTML = "<span>" + it + "</span><span>" + (i === stack.size() - 1 ? "top" : "") + "</span>";
+    st.appendChild(d);
+  });
+  $("log").innerHTML = logLines.map(l => "<li>" + l + "</li>").join("");
+}
+
+$("next").onclick = () => { note(""); screens[stack.peek()].next(); };
+$("back").onclick = () => {
+  note("");
+  const name = stack.peek();
+  if (name === "Home") { note("Back on Home exits the app. Nothing is popped."); return; }
+  if (name === "Tracking") {
+    if (confirm("Cancel ride?")) cancelRide();
+    return;
+  }
+  const gone = stack.pop(); log("pop() removed " + gone); render();
+};
+
+stack.push("Home"); log("push(Home)"); render();
+</script>
+</body>
+</html>
